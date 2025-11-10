@@ -26,10 +26,17 @@ export function AuthProvider({ children }) {
 
   const reload = useCallback(async () => {
     setChecking(true);
-    const r = await axios.get("http://localhost:3001/auth/status", {
-      withCredentials: true,
-    });
-    setIsLogged(Boolean(r.data.authenticated));
+    try {
+      const r = await axios.get("http://localhost:3001/auth/status", {
+        withCredentials: true,
+      });
+      setIsLogged(Boolean(r.data.authenticated));
+    } catch (err) {
+      console.error("Failed to check auth status:", err);
+      setIsLogged(false);
+    } finally {
+      setChecking(false);
+    }
   }, []);
 
   useEffect(() => {

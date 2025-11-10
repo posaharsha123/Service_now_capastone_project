@@ -114,7 +114,9 @@ app.get("/api/incidents", async (req, res) => {
   const sid = req.cookies.sid;
   const session = tokenStore.get(sid);
 
-  if (!session.access_token) return res.status(401).send("Not authenticated");
+  if (!session || !session.access_token) {
+    return res.status(401).send("Not authenticated");
+  }
 
   try {
     const r = await axios.get(
@@ -123,9 +125,9 @@ app.get("/api/incidents", async (req, res) => {
         headers: { Authorization: `Bearer ${session.access_token}` },
       }
     );
-    res.json(r.data);
+    return res.json(r.data);
   } catch (e) {
-    if (e.response.status == 401 && session.refresh_token) {
+    if (e.response?.status === 401 && session.refresh_token) {
       const data = {
         grant_type: "refresh_token",
         refresh_token: session.refresh_token,
@@ -140,18 +142,301 @@ app.get("/api/incidents", async (req, res) => {
         tokenStore.set(sid, { ...session, ...refresh.data });
 
         const retry = await axios.get(
-          `${SN_INTANCE}/api/now/table/incident?sysparm_display_value=true&sysparm_fields=number%2Cstate%2Cpriority%2Cshort_description`,
+          `${SN_INTANCE}/api/now/table/incident?sysparm_display_value=true&sysparm_fields=sys_id%2Cnumber%2Cstate%2Cpriority%2Cshort_description`,
           {
-            headers: { Authorization: `Bearer ${session.access_token}` },
+            headers: { Authorization: `Bearer ${refresh.data.access_token}` },
           }
         );
-        res.json(r.data);
-      } catch (e) {
-        res.status(401).send("Session Expired");
+        return res.json(retry.data);
+      } catch (refreshError) {
+        return res.status(401).send("Session Expired");
       }
-      res.status(e.response.status || 500).send("Upstream error");
     }
+    
+    return res.status(e.response?.status || 500).send("Upstream error");
   }
 });
+app.delete("/api/incidents/:sys_id", async (req, res) => {
+  const sid = req.cookies.sid;
+  const session = tokenStore.get(sid);
+
+  if (!session || !session.access_token) {
+    return res.status(401).send("Not authenticated");
+  }
+
+  const { sys_id } = req.params;
+
+  try {
+    await axios.delete(
+      `${SN_INTANCE}/api/now/table/incident/${sys_id}`,
+      {
+        headers: { Authorization: `Bearer ${session.access_token}` }
+      }
+    );
+
+    return res.status(200).json({ message: "Incident deleted successfully" });
+
+  } catch (e) {
+
+    // If token expired, try refresh
+    if (e.response?.status === 401 && session.refresh_token) {
+      try {
+        const data = {
+          grant_type: "refresh_token",
+          refresh_token: session.refresh_token,
+          client_id: CLIENT_ID,
+        };
+
+        const refresh = await axios.post(tokenEndpoint, stringify(data), {
+          headers: { "Content-Type": "application/x-www-form-urlencoded" }
+        });
+
+        tokenStore.set(sid, { ...session, ...refresh.data });
+
+        
+        await axios.delete(
+          `${SN_INTANCE}/api/now/table/incident/${sys_id}`,
+          {
+            headers: { Authorization: `Bearer ${refresh.data.access_token}` }
+          }
+        );
+
+        return res.status(200).json({ message: "Incident deleted successfully" });
+
+      } catch (refreshError) {
+        return res.status(401).send("Session Expired");
+      }
+    }
+
+    return res.status(e.response?.status || 500).send("Upstream error");
+  }
+});
+
+
+
+
+//   const session = tokenStore.get(sid);
+
+//   if (!session || !session.access_token) {
+//     return res.status(401).send("Not authenticated");
+//   }
+//   const { severity, status, incId,priority} = req.body;
+
+//   try {
+//     const r = await axios.post(
+//       `${SN_INTANCE}/api/now/table/incident?sysparm_fields=${incId}%2C${state}%2C${urgency}%2C`,
+      
+//       {
+//         headers: {
+//           Authorization: `Bearer ${session.access_token}`,
+//           "Content-Type": "application/json"
+//         }
+//       }
+//     );
+
+//     return res.status(201).send({
+//       message: "Incident created successfully",
+//       result: r.data.result
+//     });
+
+//   } catch (e) {
+
+//     // Same refresh token handling as your DELETE
+//     if (e.response?.status === 401 && session.refresh_token) {
+//       try {
+//         const body = {
+//           grant_type: "refresh_token",
+//           refresh_token: session.refresh_token,
+//           client_id: CLIENT_ID,
+//         };
+
+//         const refresh = await axios.post(tokenEndpoint, stringify(body), {
+//           headers: { "Content-Type": "application/x-www-form-urlencoded" },
+//         });
+
+//         tokenStore.set(sid, { ...session, ...refresh.data });
+
+//         // Retry POST request after refresh
+//         const r2 = await axios.post(
+//           `${SN_INTANCE}/api/now/table/incident?sysparm_fields=${incId}%2C${state}%2C${urgency}%2C`,
+          
+//           {
+//             headers: {
+//               Authorization: `Bearer ${refresh.data.access_token}`,
+//               "Content-Type": "application/json"
+//             }
+//           }
+//         );
+
+//         return res.status(201).send({
+//           message: "Incident created successfully",
+//           result: r2.data.result
+//         });
+
+//       } catch (refreshError) {
+//         return res.status(401).send("Session Expired");
+//       }
+//     }
+
+//     return res.status(e.response?.status || 500).send("Upstream error");
+//   }
+// });
+app.post("/api/incidents", async (req, res) => {
+  const sid = req.cookies.sid;
+  const session = tokenStore.get(sid);
+  if (!session || !session.access_token) {
+    return res.status(401).send("Not authenticated");
+  }
+ 
+  const { impact, urgency, short_description, status } = req.body;
+  
+  // Map status to state for ServiceNow API
+  const payload = {
+    impact,
+    urgency,
+    short_description,
+    state: status  // ServiceNow uses 'state' not 'status'
+  };
+ 
+  try {
+    const r = await axios.post(
+      `${SN_INTANCE}/api/now/table/incident`,
+      payload,
+      { 
+        headers: { 
+          Authorization: `Bearer ${session.access_token}`,
+          "Content-Type": "application/json"
+        } 
+      }
+    );
+ 
+    return res.json({
+      message: "Incident created successfully",
+      result: r.data.result,
+    });
+  } catch (e) {
+    // Handle token refresh on 401 error
+    if (e.response?.status === 401 && session.refresh_token) {
+      try {
+        const data = {
+          grant_type: "refresh_token",
+          refresh_token: session.refresh_token,
+          client_id: CLIENT_ID,
+        };
+
+        const refresh = await axios.post(tokenEndpoint, stringify(data), {
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        });
+
+        tokenStore.set(sid, { ...session, ...refresh.data });
+
+        // Retry POST request with new token
+        const r2 = await axios.post(
+          `${SN_INTANCE}/api/now/table/incident`,
+          payload,
+          { 
+            headers: { 
+              Authorization: `Bearer ${refresh.data.access_token}`,
+              "Content-Type": "application/json"
+            } 
+          }
+        );
+
+        return res.json({
+          message: "Incident created successfully",
+          result: r2.data.result,
+        });
+      } catch (refreshError) {
+        return res.status(401).send("Session Expired");
+      }
+    }
+
+    console.error("Insert failed:", e.response?.data || e.message);
+    return res
+      .status(e.response?.status || 500)
+      .send(e.response?.data?.error?.message || "Failed to insert incident");
+  }
+});
+ 
+
+app.put("/api/incidents/:sys_id", async (req, res) => {
+  const sid = req.cookies.sid;
+  const session = tokenStore.get(sid);
+  if (!session || !session.access_token) {
+    return res.status(401).send("Not authenticated");
+  }
+ 
+  const { sys_id } = req.params;
+  const { impact, urgency, short_description, status } = req.body;
+  
+  // Map status to state for ServiceNow API
+  const payload = {
+    impact,
+    urgency,
+    short_description,
+    state: status  // ServiceNow uses 'state' not 'status'
+  };
+ 
+  try {
+    const r = await axios.patch(
+      `${SN_INTANCE}/api/now/table/incident/${sys_id}`,
+      payload,
+      { 
+        headers: { 
+          Authorization: `Bearer ${session.access_token}`,
+          "Content-Type": "application/json"
+        } 
+      }
+    );
+ 
+    return res.json({
+      message: "Incident updated successfully",
+      result: r.data.result,
+    });
+  } catch (e) {
+    // Handle token refresh on 401 error
+    if (e.response?.status === 401 && session.refresh_token) {
+      try {
+        const data = {
+          grant_type: "refresh_token",
+          refresh_token: session.refresh_token,
+          client_id: CLIENT_ID,
+        };
+
+        const refresh = await axios.post(tokenEndpoint, stringify(data), {
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        });
+
+        tokenStore.set(sid, { ...session, ...refresh.data });
+
+        // Retry PATCH request with new token
+        const r2 = await axios.patch(
+          `${SN_INTANCE}/api/now/table/incident/${sys_id}`,
+          payload,
+          { 
+            headers: { 
+              Authorization: `Bearer ${refresh.data.access_token}`,
+              "Content-Type": "application/json"
+            } 
+          }
+        );
+
+        return res.json({
+          message: "Incident updated successfully",
+          result: r2.data.result,
+        });
+      } catch (refreshError) {
+        return res.status(401).send("Session Expired");
+      }
+    }
+
+    console.error("Update failed:", e.response?.data || e.message);
+    return res
+      .status(e.response?.status || 500)
+      .send(e.response?.data?.error?.message || "Failed to update incident");
+  }
+});
+
+// https://dev353572.service-now.com/api/now/table/incident/88d938150f01b210ccff40d530d1b29e?sysparm_query_no_domain=INC0015598
 
 app.listen(3001, () => console.log("BFF on 3001"));
