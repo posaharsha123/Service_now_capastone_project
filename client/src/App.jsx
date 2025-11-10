@@ -1,4 +1,4 @@
-import { AppBar, Toolbar, Typography, Container, Box, IconButton } from "@mui/material";
+import { AppBar, Toolbar, Typography, Container, IconButton } from "@mui/material";
 import { Link, Routes, Route, Outlet } from "react-router-dom";
 import Home from "./Home.jsx";
 import About from "./About.jsx";
@@ -41,12 +41,20 @@ function App() {
                   <Link className={styles.link} to="/does-not-exist">
                     404 Test
                   </Link>
-                  <Link className={styles.link} onClick={logout}>
+                  <Link 
+                    className={styles.link} 
+                    to="#" 
+                    onClick={(e) => { e.preventDefault(); logout(); }}
+                  >
                     Logout
                   </Link>
                 </>
               ) : (
-                <Link className={styles.link} onClick={login}>
+                <Link 
+                  className={styles.link} 
+                  to="#" 
+                  onClick={(e) => { e.preventDefault(); login(); }}
+                >
                   Login with ServiceNow
                 </Link>
               )}

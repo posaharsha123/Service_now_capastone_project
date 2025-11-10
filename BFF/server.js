@@ -22,10 +22,23 @@ const REDIRECT_URI = process.env.REDIRECT_URI;
 const SN_INTANCE = process.env.SN_INTANCE;
 const CLIENT_ID = process.env.CLIENT_ID;
 const CLIENT_SECRET = process.env.CLIENT_SECRET;
+
+// Validate environment variables
+if (!SN_INTANCE || !CLIENT_ID || !CLIENT_SECRET || !REDIRECT_URI) {
+  console.error("ERROR: Missing required environment variables!");
+  console.error("Required: SN_INTANCE, CLIENT_ID, CLIENT_SECRET, REDIRECT_URI");
+  console.error("Current values:", {
+    SN_INTANCE: SN_INTANCE ? "✓ Set" : "✗ Missing",
+    CLIENT_ID: CLIENT_ID ? "✓ Set" : "✗ Missing",
+    CLIENT_SECRET: CLIENT_SECRET ? "✓ Set" : "✗ Missing",
+    REDIRECT_URI: REDIRECT_URI ? "✓ Set" : "✗ Missing"
+  });
+}
+
 const authEndpoint = `${SN_INTANCE}/oauth_auth.do`;
 const tokenEndpoint = `${SN_INTANCE}/oauth_token.do`;
 
-// in real-life we would use Redis here
+
 const tokenStore = new Map();
 
 function base64url(buf) {
@@ -115,18 +128,24 @@ app.get("/api/incidents", async (req, res) => {
   const session = tokenStore.get(sid);
 
   if (!session || !session.access_token) {
+    console.error("401 Error: No session or access token. Session exists:", !!session, "Has token:", !!session?.access_token);
     return res.status(401).send("Not authenticated");
   }
 
   try {
     const r = await axios.get(
-      `${SN_INTANCE}/api/now/table/incident?sysparm_display_value=true&sysparm_fields=sys_id%2Cnumber%2Cstate%2Cpriority%2Cshort_description`,
+      `${SN_INTANCE}/api/now/table/incident?sysparm_fields=number%2Cpriority%2Cimpact%2Curgency%2Cstate%2Cshort_description%2Csys_id`,
       {
         headers: { Authorization: `Bearer ${session.access_token}` },
       }
     );
     return res.json(r.data);
   } catch (e) {
+    console.error("API Error:", {
+      status: e.response?.status,
+      message: e.response?.data || e.message,
+      url: `${SN_INTANCE}/api/now/table/incident`
+    });
     if (e.response?.status === 401 && session.refresh_token) {
       const data = {
         grant_type: "refresh_token",
@@ -142,7 +161,7 @@ app.get("/api/incidents", async (req, res) => {
         tokenStore.set(sid, { ...session, ...refresh.data });
 
         const retry = await axios.get(
-          `${SN_INTANCE}/api/now/table/incident?sysparm_display_value=true&sysparm_fields=sys_id%2Cnumber%2Cstate%2Cpriority%2Cshort_description`,
+          `${SN_INTANCE}/api/now/table/incident?sysparm_fields=number%2Cpriority%2Cimpact%2Curgency%2Cstate%2Cshort_description%2Csys_id`,
           {
             headers: { Authorization: `Bearer ${refresh.data.access_token}` },
           }
