@@ -31,7 +31,7 @@ export default function LoginCard({ isLogged, handleLogin }) {
             gutterBottom
             sx={{ color: "#0d47a1" }}   // dark blue title
           >
-            Welcome Back 👋
+            Welcome Back
           </Typography>
 
           <Typography
